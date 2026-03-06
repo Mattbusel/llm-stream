@@ -12,6 +12,7 @@
 //     #include "llm_stream.hpp"
 //
 // Requires: libcurl (ships on macOS, most Linux distros; vcpkg/apt on Windows)
+// C++17 or later. Compiles with -Wall -Wextra -std=c++17.
 
 #include <chrono>
 #include <cstdio>
@@ -27,20 +28,20 @@ namespace llm {
 // Public types
 // ---------------------------------------------------------------------------
 
+/// Configuration for an LLM request.
+struct Config {
+    std::string api_key;
+    std::string model         = "gpt-4o-mini"; ///< Default model; "claude-*" prefix routes to Anthropic
+    int         max_tokens    = 1024;
+    double      temperature   = 0.7;
+    std::string system_prompt;                 ///< Optional system/instruction prompt
+};
+
 /// Statistics surfaced at the end of a stream.
 struct StreamStats {
     size_t token_count    = 0;
     double elapsed_ms     = 0.0;
     double tokens_per_sec = 0.0;
-};
-
-/// Configuration for an LLM request.
-struct Config {
-    std::string api_key;
-    std::string model;
-    int         max_tokens  = 1024;
-    double      temperature = 0.7;
-    std::string system_prompt; ///< Optional system/instruction prompt
 };
 
 using TokenCallback = std::function<void(std::string_view token)>;
@@ -121,11 +122,19 @@ namespace llm {
 namespace detail {
 
 // ---------------------------------------------------------------------------
-// Minimal hand-rolled JSON string extractor. No external deps.
-// Finds `"key": "value"` (whitespace-tolerant) and returns the unescaped
-// string value, or empty string if not found.
+// Minimal hand-rolled JSON helpers. No external dependencies.
+//
+// json_extract_string: finds `"key": "value"` (whitespace-tolerant) in a
+//   flat JSON fragment and returns the unescaped string value, or "" if absent.
+//
+// json_extract_nested: locates the first occurrence of `"outer"` then
+//   searches for `"inner"` within the remainder — sufficient for SSE deltas
+//   like {"delta":{"type":"text_delta","text":"hi"}} with outer="delta",
+//   inner="text".
 // ---------------------------------------------------------------------------
-static std::string json_string_value(std::string_view json, std::string_view key) {
+
+/// Extract value of a string key from flat JSON — sufficient for SSE deltas.
+static std::string json_extract_string(std::string_view json, std::string_view key) {
     // Build search token: "key"
     std::string pattern;
     pattern.reserve(key.size() + 2);
@@ -166,9 +175,28 @@ static std::string json_string_value(std::string_view json, std::string_view key
     return result;
 }
 
+/// Extract value of a nested key path: locate `"outer"` first, then find
+/// `"inner"` within the JSON from that point onward.
+static std::string json_extract_nested(std::string_view json,
+                                       std::string_view outer,
+                                       std::string_view inner) {
+    std::string outer_pattern;
+    outer_pattern.reserve(outer.size() + 2);
+    outer_pattern += '"';
+    outer_pattern += outer;
+    outer_pattern += '"';
+
+    auto pos = json.find(outer_pattern);
+    if (pos == std::string_view::npos) return {};
+
+    return json_extract_string(json.substr(pos), inner);
+}
+
 // ---------------------------------------------------------------------------
 // RAII wrappers around libcurl types
 // ---------------------------------------------------------------------------
+
+/// RAII wrapper around a CURL* easy handle.
 struct CurlHandle {
     CURL* handle = nullptr;
     CurlHandle() : handle(curl_easy_init()) {}
@@ -179,12 +207,13 @@ struct CurlHandle {
     bool ok() const { return handle != nullptr; }
 };
 
+/// RAII wrapper around a curl_slist* header list.
 struct CurlSlist {
     curl_slist* list = nullptr;
+    CurlSlist() = default;
     ~CurlSlist() { if (list) curl_slist_free_all(list); }
     CurlSlist(const CurlSlist&)            = delete;
     CurlSlist& operator=(const CurlSlist&) = delete;
-    CurlSlist() = default;
     void append(const char* s) { list = curl_slist_append(list, s); }
 };
 
@@ -196,26 +225,37 @@ enum class Provider { OpenAI, Anthropic };
 struct StreamCtx {
     Provider      provider;
     TokenCallback on_token;
-    std::string   buffer;       // incomplete SSE line accumulator
-    size_t        token_count = 0;
+    std::string   buffer;           ///< Accumulates incomplete SSE lines between curl callbacks
+    std::string   pending_event;    ///< Last SSE event: field value (Anthropic uses this for routing)
+    size_t        token_count  = 0;
+    bool          done         = false; ///< Set true when stream signals completion
 };
 
-// Extract the content delta from an OpenAI SSE data line.
-// Payload format: {"id":...,"choices":[{"delta":{"content":"<tok>"},...}],...}
+// ---------------------------------------------------------------------------
+// JSON delta extractors — one per provider
+// ---------------------------------------------------------------------------
+
+/// Extract the content delta from an OpenAI SSE data payload.
+/// Payload: {"id":...,"choices":[{"delta":{"content":"<tok>"},...}],...}
 static std::string openai_extract_delta(std::string_view payload) {
     auto choices = payload.find("\"choices\"");
     if (choices == std::string_view::npos) return {};
     auto delta = payload.find("\"delta\"", choices);
     if (delta == std::string_view::npos) return {};
-    return json_string_value(payload.substr(delta), "content");
+    return json_extract_string(payload.substr(delta), "content");
 }
 
-// Extract the text delta from an Anthropic SSE data line.
-// Payload format: {"type":"content_block_delta","delta":{"type":"text_delta","text":"<tok>"}}
-static std::string anthropic_extract_delta(std::string_view payload) {
-    auto delta = payload.find("\"delta\"");
-    if (delta == std::string_view::npos) return {};
-    return json_string_value(payload.substr(delta), "text");
+/// Extract the text delta from an Anthropic SSE data payload.
+/// Relevant events have type "content_block_delta" and delta.type "text_delta".
+/// "message_stop" events are handled in write_callback by setting ctx->done.
+static std::string anthropic_extract_delta(std::string_view payload,
+                                           std::string_view event_type) {
+    // Only content_block_delta events carry streaming text
+    if (event_type == "content_block_delta" ||
+        json_extract_string(payload, "type") == "content_block_delta") {
+        return json_extract_nested(payload, "delta", "text");
+    }
+    return {};
 }
 
 static size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdata) {
@@ -231,28 +271,48 @@ static size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdat
         if (nl == std::string::npos) break;
 
         std::string_view line(ctx->buffer.data() + start, nl - start);
+        // Strip trailing CR (CRLF line endings)
         if (!line.empty() && line.back() == '\r')
             line = line.substr(0, line.size() - 1);
 
-        if (line.substr(0, 6) == "data: ") {
+        if (line.substr(0, 7) == "event: ") {
+            // Track the SSE event type for Anthropic event-based routing
+            ctx->pending_event = std::string(line.substr(7));
+        } else if (line.substr(0, 6) == "data: ") {
             std::string_view payload = line.substr(6);
-            if (payload != "[DONE]") {
+
+            if (payload == "[DONE]") {
+                // OpenAI signals end-of-stream with [DONE]
+                ctx->done = true;
+            } else {
                 std::string token;
-                if (ctx->provider == Provider::OpenAI)
+                if (ctx->provider == Provider::OpenAI) {
                     token = openai_extract_delta(payload);
-                else
-                    token = anthropic_extract_delta(payload);
+                } else {
+                    // Anthropic signals completion via message_stop event type
+                    std::string_view ev = ctx->pending_event;
+                    if (ev == "message_stop" ||
+                        json_extract_string(payload, "type") == "message_stop") {
+                        ctx->done = true;
+                    } else {
+                        token = anthropic_extract_delta(payload, ev);
+                    }
+                }
 
                 if (!token.empty() && ctx->on_token) {
                     ctx->on_token(token);
                     ++ctx->token_count;
                 }
             }
+        } else if (line.empty()) {
+            // An empty line is the SSE event separator — clear the event type
+            ctx->pending_event.clear();
         }
+
         start = nl + 1;
     }
 
-    // Keep any incomplete line
+    // Keep any incomplete line in the buffer for the next curl callback
     ctx->buffer.erase(0, start);
     return total;
 }
