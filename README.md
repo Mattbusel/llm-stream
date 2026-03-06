@@ -136,6 +136,18 @@ export ANTHROPIC_API_KEY=sk-ant-...
 - C++17 (`-std=c++17`)
 - libcurl — ships by default on macOS and most Linux distros. On Windows, grab it from [curl.se](https://curl.se/windows/).
 
+## See Also
+
+The C++ LLM header suite — each is a single `.hpp`, no extra deps:
+
+| Repo | What it does |
+|------|-------------|
+| **llm-stream** *(this repo)* | Streaming responses from OpenAI & Anthropic |
+| [llm-cache](https://github.com/Mattbusel/llm-cache) | Response caching — skip redundant API calls |
+| [llm-cost](https://github.com/Mattbusel/llm-cost) | Token counting + per-model cost estimation |
+| [llm-retry](https://github.com/Mattbusel/llm-retry) | Retry logic + circuit breaker |
+| [llm-format](https://github.com/Mattbusel/llm-format) | Structured output / JSON schema enforcement |
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

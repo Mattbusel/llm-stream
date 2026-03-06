@@ -16,8 +16,8 @@
 
 #include <chrono>
 #include <cstdio>
-#include <cstring>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <curl/curl.h>
@@ -196,10 +196,18 @@ static std::string json_extract_nested(std::string_view json,
 // RAII wrappers around libcurl types
 // ---------------------------------------------------------------------------
 
+/// Thread-safe one-time libcurl global initialization.
+/// curl_global_init is not thread-safe; calling it from curl_easy_init's
+/// implicit path races under concurrent stream() calls. We do it once here.
+inline void curl_global_init_once() {
+    static std::once_flag flag;
+    std::call_once(flag, []{ curl_global_init(CURL_GLOBAL_DEFAULT); });
+}
+
 /// RAII wrapper around a CURL* easy handle.
 struct CurlHandle {
     CURL* handle = nullptr;
-    CurlHandle() : handle(curl_easy_init()) {}
+    CurlHandle() { curl_global_init_once(); handle = curl_easy_init(); }
     ~CurlHandle() { if (handle) curl_easy_cleanup(handle); }
     CurlHandle(const CurlHandle&)            = delete;
     CurlHandle& operator=(const CurlHandle&) = delete;
@@ -225,10 +233,9 @@ enum class Provider { OpenAI, Anthropic };
 struct StreamCtx {
     Provider      provider;
     TokenCallback on_token;
-    std::string   buffer;           ///< Accumulates incomplete SSE lines between curl callbacks
-    std::string   pending_event;    ///< Last SSE event: field value (Anthropic uses this for routing)
-    size_t        token_count  = 0;
-    bool          done         = false; ///< Set true when stream signals completion
+    std::string   buffer;        ///< Accumulates incomplete SSE lines between curl callbacks
+    std::string   pending_event; ///< Last SSE event type (Anthropic uses this for routing)
+    size_t        token_count = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -282,8 +289,7 @@ static size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdat
             std::string_view payload = line.substr(6);
 
             if (payload == "[DONE]") {
-                // OpenAI signals end-of-stream with [DONE]
-                ctx->done = true;
+                // OpenAI end-of-stream marker — nothing to extract
             } else {
                 std::string token;
                 if (ctx->provider == Provider::OpenAI) {
@@ -291,10 +297,10 @@ static size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdat
                 } else {
                     // Anthropic signals completion via message_stop event type
                     std::string_view ev = ctx->pending_event;
-                    if (ev == "message_stop" ||
-                        json_extract_string(payload, "type") == "message_stop") {
-                        ctx->done = true;
-                    } else {
+                    const bool is_stop =
+                        ev == "message_stop" ||
+                        json_extract_string(payload, "type") == "message_stop";
+                    if (!is_stop) {
                         token = anthropic_extract_delta(payload, ev);
                     }
                 }

@@ -8,9 +8,15 @@ find_package(CURL REQUIRED)
 add_executable(basic_stream examples/basic_stream.cpp)
 target_include_directories(basic_stream PRIVATE include)
 target_link_libraries(basic_stream CURL::libcurl)
-target_compile_options(basic_stream PRIVATE -Wall -Wextra)
+target_compile_options(basic_stream PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+)
 
 add_executable(chat_loop examples/chat_loop.cpp)
 target_include_directories(chat_loop PRIVATE include)
 target_link_libraries(chat_loop CURL::libcurl)
-target_compile_options(chat_loop PRIVATE -Wall -Wextra)
+target_compile_options(chat_loop PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+)

@@ -43,7 +43,10 @@ int main() {
         }
         if (user_input.empty()) continue;
 
-        // Build prompt from full history
+        // Build prompt from full history.
+        // Note: llm::stream() takes a single string prompt. We serialize history
+        // here so the model sees prior context. For production use, consider a
+        // library that exposes a messages[] API directly.
         std::string prompt;
         for (const auto& turn : history) {
             prompt += (turn.role == "user" ? "Human: " : "Assistant: ");
