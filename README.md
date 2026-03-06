@@ -4,7 +4,7 @@ Stream OpenAI and Anthropic responses in C++. Drop in one header. No deps.
 
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
-![Single Header](https://img.shields.io/badge/single-header-orange)
+![Single Header](https://img.shields.io/badge/library-single--header-orange)
 ![libcurl](https://img.shields.io/badge/dep-libcurl-lightgrey)
 
 ---
@@ -33,73 +33,63 @@ int main() {
 }
 ```
 
+Compile and run:
+
 ```bash
+g++ -std=c++17 -O2 basic_stream.cpp -lcurl -o basic_stream
 export OPENAI_API_KEY=sk-...
-cmake -B build && cmake --build build
-./build/basic_stream
+./basic_stream
 ```
 
 ---
 
 ## Installation
 
-Copy `include/llm_stream.hpp` into your project. That's it.
+Copy one file into your project:
 
 ```bash
-cp llm_stream.hpp /your/project/include/
+cp include/llm_stream.hpp your-project/
 ```
 
-In **one** `.cpp` file:
-```cpp
-#define LLM_STREAM_IMPLEMENTATION
-#include "llm_stream.hpp"
-```
-
-In all other files:
-```cpp
-#include "llm_stream.hpp"
-```
-
-Link against libcurl (`-lcurl` or `CURL::libcurl` in CMake).
+That's it. No package manager, no build system changes beyond adding `-lcurl`.
 
 ---
 
-## API reference
+## API Reference
 
-### `llm::Config`
+### Types
 
 ```cpp
+namespace llm {
+
+// Configuration for an LLM request
 struct Config {
-    std::string api_key;          // Required: your API key
-    std::string model;            // Required: e.g. "gpt-4o-mini", "claude-3-5-haiku-20241022"
-    int         max_tokens  = 1024;
-    double      temperature = 0.7;
-    std::string system_prompt;    // Optional system/instruction message
+    std::string api_key;
+    std::string model;
+    int         max_tokens  = 1024;   // token budget
+    double      temperature = 0.7;    // 0.0-2.0
+    std::string system_prompt;        // optional system/instruction message
 };
-```
 
-### `llm::StreamStats`
-
-```cpp
+// Statistics reported at end of stream
 struct StreamStats {
-    size_t token_count;    // Number of token fragments received
-    double elapsed_ms;     // Total wall-clock time in milliseconds
-    double tokens_per_sec; // Throughput
+    size_t token_count;    // total tokens received
+    double elapsed_ms;     // wall time from first byte to [DONE]
+    double tokens_per_sec; // throughput
 };
-```
 
-### Callbacks
-
-```cpp
+// Callback types
 using TokenCallback = std::function<void(std::string_view token)>;
 using DoneCallback  = std::function<void(const StreamStats&)>;
 using ErrorCallback = std::function<void(std::string_view error)>;
+
+} // namespace llm
 ```
 
 ### Functions
 
 ```cpp
-// Stream from OpenAI chat/completions endpoint
+// Stream from OpenAI chat/completions
 void llm::stream_openai(
     const std::string& prompt,
     const Config&      config,
@@ -108,7 +98,7 @@ void llm::stream_openai(
     ErrorCallback      on_error = nullptr    // optional
 );
 
-// Stream from Anthropic messages endpoint
+// Stream from Anthropic messages API
 void llm::stream_anthropic(
     const std::string& prompt,
     const Config&      config,
@@ -117,7 +107,9 @@ void llm::stream_anthropic(
     ErrorCallback      on_error = nullptr
 );
 
-// Auto-detect provider: "claude-*" → Anthropic, everything else → OpenAI
+// Auto-detect provider from model name:
+//   "claude-*"  -> Anthropic
+//   everything else -> OpenAI
 void llm::stream(
     const std::string& prompt,
     const Config&      config,
@@ -127,29 +119,61 @@ void llm::stream(
 );
 ```
 
+### Implementation guard
+
+In **exactly one** `.cpp` file, define `LLM_STREAM_IMPLEMENTATION` before the include:
+
+```cpp
+// my_app.cpp
+#define LLM_STREAM_IMPLEMENTATION
+#include "llm_stream.hpp"
+```
+
+In all other files, just include it normally:
+
+```cpp
+// other_file.cpp
+#include "llm_stream.hpp"
+```
+
 ---
 
 ## Examples
 
 | File | Description |
 |------|-------------|
-| [`examples/basic_stream.cpp`](examples/basic_stream.cpp) | Minimal OpenAI streaming hello-world |
-| [`examples/chat_loop.cpp`](examples/chat_loop.cpp) | Multi-turn interactive REPL, auto-detects provider |
+| [`examples/basic_stream.cpp`](examples/basic_stream.cpp) | Stream one OpenAI response, print tokens and stats |
+| [`examples/chat_loop.cpp`](examples/chat_loop.cpp) | Interactive multi-turn REPL, auto-picks OpenAI or Anthropic |
+
+### Chat loop (Anthropic)
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+./build/chat_loop
+
+# [Using Anthropic: claude-3-5-haiku-20241022]
+#
+# Chat loop started. Type 'exit' to quit.
+# ----------------------------------------
+#
+# You: What is the capital of France?
+# Assistant: Paris is the capital of France...
+# [23 tokens | 87 tok/s | 264 ms]
+```
 
 ---
 
 ## Why
 
-- **No Python runtime.** Ship LLM features inside your existing C++ binary — games, embedded apps, CLIs, servers.
-- **No build complexity.** One header, one dependency (libcurl), done. No CMake package hunting for JSON libraries.
-- **Drop into any project.** Copy one file. Works with any build system: CMake, Meson, Bazel, hand-written Makefiles.
+- **No Python runtime.** Deploy a static binary. LLM calls in a game engine, CLI tool, embedded app, or server -- no interpreter required.
+- **No build complexity.** One header + `-lcurl`. Works with any existing C++ build system: Make, CMake, Bazel, Meson, or plain `g++`.
+- **Drop into any C++ project.** No namespace pollution, no global state, no init/shutdown -- just call `llm::stream()` and go.
 
 ---
 
 ## Building the examples
 
 ```bash
-# Configure and build
 cmake -B build
 cmake --build build
 
@@ -157,7 +181,7 @@ cmake --build build
 export OPENAI_API_KEY=sk-...
 ./build/basic_stream
 
-# Anthropic or OpenAI interactive REPL (set either key)
+# Multi-turn REPL (uses ANTHROPIC_API_KEY if set, else OPENAI_API_KEY)
 export ANTHROPIC_API_KEY=sk-ant-...
 ./build/chat_loop
 ```
@@ -167,10 +191,10 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## Requirements
 
 - C++17 or later
-- libcurl (ships by default on macOS and most Linux distros; install via `apt install libcurl4-openssl-dev` on Ubuntu, or [vcpkg](https://vcpkg.io) on Windows)
+- libcurl (ships by default on macOS and most Linux distros; `apt install libcurl4-openssl-dev` on Debian/Ubuntu; `vcpkg install curl` on Windows)
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT -- see [LICENSE](LICENSE).
