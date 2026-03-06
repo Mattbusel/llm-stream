@@ -53,7 +53,7 @@ namespace llm {
 3. **Blocking the stream** — never do heavy work inside `on_token`. It blocks the curl write callback.
 4. **Forgetting `#ifdef LLM_STREAM_IMPLEMENTATION`** — implementation must be inside this guard.
 5. **Skipping null checks on callbacks** — `on_done` and `on_error` may be nullptr; always check before calling.
-6. **Using `curl_global_init` inside the RAII handle** — call it once at stream start, cleanup at end.
+6. **Calling `curl_global_init` more than once** — it is called exactly once via `std::call_once` inside `detail::curl_global_init_once()`, which is invoked from `CurlHandle`'s constructor. Do not add additional calls.
 
 ## JSON Parsing
 Use only the hand-rolled minimal JSON parser inside `llm_stream.hpp`.

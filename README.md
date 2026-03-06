@@ -18,8 +18,11 @@ Copy `include/llm_stream.hpp` into your project. That's the whole library.
 #include <cstdlib>
 
 int main() {
+    const char* key = std::getenv("OPENAI_API_KEY");
+    if (!key) { std::cerr << "OPENAI_API_KEY not set\n"; return 1; }
+
     llm::Config cfg;
-    cfg.api_key = std::getenv("OPENAI_API_KEY");
+    cfg.api_key = key;
     cfg.model   = "gpt-4o-mini";
 
     llm::stream_openai("Explain recursion in one paragraph.", cfg,

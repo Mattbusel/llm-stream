@@ -1,10 +1,16 @@
 build/
 *.o
+*.obj
 *.a
 *.so
+*.dylib
+*.dll
 *.exe
 .DS_Store
+Thumbs.db
 CMakeFiles/
 cmake_install.cmake
 CMakeCache.txt
 Makefile
+.vscode/
+.idea/
