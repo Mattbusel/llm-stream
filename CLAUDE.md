@@ -1,19 +1,16 @@
 # CLAUDE.md — llm-stream
 
 ## Build
-
 ```bash
 cmake -B build && cmake --build build
 ```
 
 ## Test
-
 ```bash
 cd build && ctest
 ```
 
 ## Run Examples
-
 ```bash
 export OPENAI_API_KEY=sk-...
 ./build/basic_stream
@@ -22,65 +19,54 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ./build/chat_loop
 ```
 
-## Key Constraint: SINGLE HEADER
-
+## THE ONE RULE: SINGLE HEADER
 `include/llm_stream.hpp` is the entire library. Never refactor it into multiple files.
+Never create a `src/` directory. Never split into `.cpp` files.
 
-## Public API (maintain exactly)
+## API Surface to Maintain
+These signatures must remain stable:
 
 ```cpp
 namespace llm {
+    void stream_openai(const std::string& prompt, const Config& config,
+                       TokenCallback on_token,
+                       DoneCallback on_done = nullptr,
+                       ErrorCallback on_error = nullptr);
 
-struct Config {
-    std::string api_key;
-    std::string model;
-    int max_tokens = 1024;
-    double temperature = 0.7;
-    std::string system_prompt;
-};
+    void stream_anthropic(const std::string& prompt, const Config& config,
+                          TokenCallback on_token,
+                          DoneCallback on_done = nullptr,
+                          ErrorCallback on_error = nullptr);
 
-struct StreamStats {
-    size_t token_count;
-    double elapsed_ms;
-    double tokens_per_sec;
-};
-
-using TokenCallback = std::function<void(std::string_view token)>;
-using DoneCallback  = std::function<void(const StreamStats&)>;
-using ErrorCallback = std::function<void(std::string_view error)>;
-
-void stream_openai(const std::string& prompt, const Config& config,
-                   TokenCallback on_token,
-                   DoneCallback on_done = nullptr,
-                   ErrorCallback on_error = nullptr);
-
-void stream_anthropic(const std::string& prompt, const Config& config,
-                      TokenCallback on_token,
-                      DoneCallback on_done = nullptr,
-                      ErrorCallback on_error = nullptr);
-
-// Auto-detects provider: "gpt-*" -> OpenAI, "claude-*" -> Anthropic
-void stream(const std::string& prompt, const Config& config,
-            TokenCallback on_token,
-            DoneCallback on_done = nullptr,
-            ErrorCallback on_error = nullptr);
-
-} // namespace llm
+    void stream(const std::string& prompt, const Config& config,
+                TokenCallback on_token,
+                DoneCallback on_done = nullptr,
+                ErrorCallback on_error = nullptr);
+}
 ```
 
-## Implementation Guard
-
-Define in exactly one translation unit:
-
-```cpp
-#define LLM_STREAM_IMPLEMENTATION
-#include "llm_stream.hpp"
-```
+`stream()` auto-detects provider: `gpt-*` → OpenAI, `claude-*` → Anthropic.
 
 ## Common Mistakes to Avoid
+1. **Adding dependencies** — libcurl is the only allowed dep. No JSON libs, no HTTP libs.
+2. **Throwing exceptions in callbacks** — callbacks must be noexcept-friendly. Use `on_error` instead.
+3. **Blocking the stream** — never do heavy work inside `on_token`. It blocks the curl write callback.
+4. **Forgetting `#ifdef LLM_STREAM_IMPLEMENTATION`** — implementation must be inside this guard.
+5. **Skipping null checks on callbacks** — `on_done` and `on_error` may be nullptr; always check before calling.
+6. **Using `curl_global_init` inside the RAII handle** — call it once at stream start, cleanup at end.
 
-- Adding dependencies — libcurl only, no JSON libraries
-- Throwing exceptions in callbacks
-- Blocking inside callbacks — they run on the curl write thread
-- Splitting the header into multiple files
-- Raw `curl_easy_cleanup` at function exit — use RAII
+## JSON Parsing
+Use only the hand-rolled minimal JSON parser inside `llm_stream.hpp`.
+Never add nlohmann/json, rapidjson, simdjson, or any other JSON library.
+
+## Implementation Guard Pattern
+```cpp
+#pragma once
+// ... declarations ...
+
+#ifdef LLM_STREAM_IMPLEMENTATION
+// ... full implementation ...
+#endif // LLM_STREAM_IMPLEMENTATION
+```
+
+Users put `#define LLM_STREAM_IMPLEMENTATION` in exactly ONE .cpp file before including.

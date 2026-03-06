@@ -1,61 +1,60 @@
 # AGENTS.md — llm-stream
 
 ## Purpose
-
-`llm-stream` is a zero-dependency single-header C++ library for streaming LLM responses
-from OpenAI and Anthropic APIs. The entire library lives in one file: `include/llm_stream.hpp`.
+`llm-stream` is a zero-dependency, single-header C++ library for streaming LLM responses
+from OpenAI and Anthropic APIs. The only external dependency is libcurl.
 
 ## Architecture
-
-```
-llm-stream/
-  include/
-    llm_stream.hpp      <- THE ENTIRE LIBRARY. Do not split this.
-  examples/
-    basic_stream.cpp    <- Minimal OpenAI streaming example
-    chat_loop.cpp       <- Multi-turn interactive REPL (OpenAI + Anthropic)
-  CMakeLists.txt        <- Builds examples only (library is header-only)
-  README.md
-  AGENTS.md
-  CLAUDE.md
-  LICENSE
-```
+- Everything lives in `include/llm_stream.hpp` — this is the ENTIRE library.
+- Examples live in `examples/`.
+- There are no .cpp source files for the library itself.
+- Implementation is guarded by `#ifdef LLM_STREAM_IMPLEMENTATION` so users control where it compiles.
 
 ## Build & Test
-
 ```bash
 cmake -B build && cmake --build build
 cd build && ctest
 ```
 
-## Rules for All Agents
+## Critical Constraints
+- **SINGLE HEADER**: Never split the library into multiple files. `include/llm_stream.hpp` is everything.
+- **libcurl ONLY**: No additional dependencies under any circumstance. No nlohmann, no rapidjson, no boost.
+- **Namespace**: All public API must be in namespace `llm`.
+- **C++17**: Compile with `-std=c++17`. No C++20 features.
+- **No exceptions in hot path**: Use error callbacks or std::optional/error codes instead.
+- **RAII**: Wrap all CURL* handles in RAII wrappers — never call curl_easy_cleanup manually.
 
-### The One Absolute Constraint
-**The library MUST remain a single header.** `include/llm_stream.hpp` is the entire library.
-Never create additional `.cpp` or `.hpp` files for library code. Never split the implementation.
+## Public API Surface
+```cpp
+namespace llm {
+    struct Config { std::string api_key, model, system_prompt; int max_tokens; double temperature; };
+    struct StreamStats { size_t token_count; double elapsed_ms, tokens_per_sec; };
+    using TokenCallback = std::function<void(std::string_view)>;
+    using DoneCallback  = std::function<void(const StreamStats&)>;
+    using ErrorCallback = std::function<void(std::string_view)>;
 
-### Dependencies
-- `libcurl` is the **only** allowed external dependency.
-- Do NOT add nlohmann/json, rapidjson, boost, or any other library.
-- JSON parsing must use the hand-rolled minimal parser inside `llm_stream.hpp`.
+    void stream_openai(const std::string& prompt, const Config&, TokenCallback, DoneCallback, ErrorCallback);
+    void stream_anthropic(const std::string& prompt, const Config&, TokenCallback, DoneCallback, ErrorCallback);
+    void stream(const std::string& prompt, const Config&, TokenCallback, DoneCallback, ErrorCallback);
+}
+```
 
-### Namespace
-All public API must live in namespace `llm`.
+## Callback Rules
+- `on_token`: called for every text delta received from the stream
+- `on_done`: called once when stream ends successfully, with stats
+- `on_error`: called on any error (network, API, parse); stream stops after this
 
-### API Surface
-Callback-based streaming:
-- `on_token(std::string_view token)` - called for each streamed token
-- `on_done(const StreamStats&)` - called when stream ends successfully
-- `on_error(std::string_view error)` - called on failure
+## Agent Workflow
+- Agent 1: repo setup (main branch)
+- Agent 2: AGENTS.md + CLAUDE.md (main branch)
+- Agent 3: core library (`feat/core-library` branch → PR to main)
+- Agent 4: examples + CMakeLists.txt (`feat/examples` branch → PR to main)
+- Agent 5: README.md (main branch)
+- Merge order: PR 3 first, then PR 4, then README
+- No agent merges their own PR — coordinate through Agent 1
 
-### Style
-- C++17, no exceptions in the hot path / callbacks
-- RAII for all curl handles (`curl_easy_cleanup` via destructor)
-- Each `stream_*()` call is fully self-contained and thread-safe
-- Compile clean with `-Wall -Wextra -std=c++17`
-
-### PR Order (Agent 1 merges)
-1. Agent 3: branch `feat/core-library` -> PR to `main`
-2. Agent 4: branch `feat/examples` -> PR to `main`
-3. Agent 2: docs -> PR to `main`
-4. Agent 5: README -> PR to `main`
+## Style Guide
+- Prefer `std::string_view` over `const std::string&` for read-only string params
+- Use `using` aliases over `typedef`
+- snake_case for everything
+- Minimal includes — only what is strictly needed
