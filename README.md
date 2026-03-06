@@ -2,21 +2,20 @@
 
 Stream OpenAI and Anthropic responses in C++. Drop in one header. No deps.
 
-![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)
-![License: MIT](https://img.shields.io/badge/License-MIT-green)
-![Single Header](https://img.shields.io/badge/library-single--header-orange)
-![libcurl](https://img.shields.io/badge/dep-libcurl-lightgrey)
+![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)
+![License MIT](https://img.shields.io/badge/license-MIT-green.svg)
+![Single Header](https://img.shields.io/badge/single-header-orange.svg)
+![libcurl](https://img.shields.io/badge/dep-libcurl-lightgrey.svg)
 
----
+## Quickstart
 
-## 30-second quickstart
+Copy `include/llm_stream.hpp` into your project. That's the whole library.
 
 ```cpp
 #define LLM_STREAM_IMPLEMENTATION
 #include "llm_stream.hpp"
-
-#include <cstdlib>
 #include <iostream>
+#include <cstdlib>
 
 int main() {
     llm::Config cfg;
@@ -26,175 +25,117 @@ int main() {
     llm::stream_openai("Explain recursion in one paragraph.", cfg,
         [](std::string_view token) { std::cout << token << std::flush; },
         [](const llm::StreamStats& s) {
-            std::cout << "\n\n[" << s.token_count << " tokens, "
-                      << static_cast<int>(s.tokens_per_sec) << " tok/s]\n";
+            std::cout << "\n[" << s.token_count << " tokens, " << s.tokens_per_sec << " tok/s]\n";
         }
     );
 }
 ```
 
-Compile and run:
-
+Compile:
 ```bash
-g++ -std=c++17 -O2 basic_stream.cpp -lcurl -o basic_stream
-export OPENAI_API_KEY=sk-...
-./basic_stream
+g++ -std=c++17 main.cpp -lcurl -o stream
+./stream
 ```
-
----
 
 ## Installation
 
-Copy one file into your project:
+Copy `include/llm_stream.hpp` into your project. No build system changes required beyond linking libcurl.
 
-```bash
-cp include/llm_stream.hpp your-project/
-```
-
-That's it. No package manager, no build system changes beyond adding `-lcurl`.
-
----
+Put `#define LLM_STREAM_IMPLEMENTATION` in exactly one `.cpp` file before the include. All other files just `#include "llm_stream.hpp"`.
 
 ## API Reference
 
-### Types
+### Config
 
 ```cpp
-namespace llm {
-
-// Configuration for an LLM request
 struct Config {
     std::string api_key;
-    std::string model;
-    int         max_tokens  = 1024;   // token budget
-    double      temperature = 0.7;    // 0.0-2.0
-    std::string system_prompt;        // optional system/instruction message
+    std::string model        = "gpt-4o-mini";  // or "claude-3-5-haiku-20241022"
+    int         max_tokens   = 1024;
+    double      temperature  = 0.7;
+    std::string system_prompt;
 };
+```
 
-// Statistics reported at end of stream
+### StreamStats
+
+```cpp
 struct StreamStats {
-    size_t token_count;    // total tokens received
-    double elapsed_ms;     // wall time from first byte to [DONE]
+    size_t token_count;    // number of tokens received
+    double elapsed_ms;     // total wall time in milliseconds
     double tokens_per_sec; // throughput
 };
+```
 
-// Callback types
+### Callbacks
+
+```cpp
 using TokenCallback = std::function<void(std::string_view token)>;
 using DoneCallback  = std::function<void(const StreamStats&)>;
 using ErrorCallback = std::function<void(std::string_view error)>;
-
-} // namespace llm
 ```
 
 ### Functions
 
 ```cpp
-// Stream from OpenAI chat/completions
+// Stream from OpenAI
 void llm::stream_openai(
     const std::string& prompt,
-    const Config&      config,
-    TokenCallback      on_token,
-    DoneCallback       on_done  = nullptr,   // optional
-    ErrorCallback      on_error = nullptr    // optional
+    const Config& config,
+    TokenCallback on_token,
+    DoneCallback  on_done  = nullptr,   // optional
+    ErrorCallback on_error = nullptr    // optional
 );
 
-// Stream from Anthropic messages API
+// Stream from Anthropic
 void llm::stream_anthropic(
     const std::string& prompt,
-    const Config&      config,
-    TokenCallback      on_token,
-    DoneCallback       on_done  = nullptr,
-    ErrorCallback      on_error = nullptr
+    const Config& config,
+    TokenCallback on_token,
+    DoneCallback  on_done  = nullptr,
+    ErrorCallback on_error = nullptr
 );
 
-// Auto-detect provider from model name:
-//   "claude-*"  -> Anthropic
-//   everything else -> OpenAI
+// Auto-detect provider from model name: "gpt-*" → OpenAI, "claude-*" → Anthropic
 void llm::stream(
     const std::string& prompt,
-    const Config&      config,
-    TokenCallback      on_token,
-    DoneCallback       on_done  = nullptr,
-    ErrorCallback      on_error = nullptr
+    const Config& config,
+    TokenCallback on_token,
+    DoneCallback  on_done  = nullptr,
+    ErrorCallback on_error = nullptr
 );
 ```
-
-### Implementation guard
-
-In **exactly one** `.cpp` file, define `LLM_STREAM_IMPLEMENTATION` before the include:
-
-```cpp
-// my_app.cpp
-#define LLM_STREAM_IMPLEMENTATION
-#include "llm_stream.hpp"
-```
-
-In all other files, just include it normally:
-
-```cpp
-// other_file.cpp
-#include "llm_stream.hpp"
-```
-
----
 
 ## Examples
 
-| File | Description |
-|------|-------------|
-| [`examples/basic_stream.cpp`](examples/basic_stream.cpp) | Stream one OpenAI response, print tokens and stats |
-| [`examples/chat_loop.cpp`](examples/chat_loop.cpp) | Interactive multi-turn REPL, auto-picks OpenAI or Anthropic |
+- [`examples/basic_stream.cpp`](examples/basic_stream.cpp) — single prompt, print tokens as they arrive
+- [`examples/chat_loop.cpp`](examples/chat_loop.cpp) — interactive multi-turn REPL with conversation history
 
-### Chat loop (Anthropic)
+## Building the Examples
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-./build/chat_loop
+cmake -B build && cmake --build build
 
-# [Using Anthropic: claude-3-5-haiku-20241022]
-#
-# Chat loop started. Type 'exit' to quit.
-# ----------------------------------------
-#
-# You: What is the capital of France?
-# Assistant: Paris is the capital of France...
-# [23 tokens | 87 tok/s | 264 ms]
-```
-
----
-
-## Why
-
-- **No Python runtime.** Deploy a static binary. LLM calls in a game engine, CLI tool, embedded app, or server -- no interpreter required.
-- **No build complexity.** One header + `-lcurl`. Works with any existing C++ build system: Make, CMake, Bazel, Meson, or plain `g++`.
-- **Drop into any C++ project.** No namespace pollution, no global state, no init/shutdown -- just call `llm::stream()` and go.
-
----
-
-## Building the examples
-
-```bash
-cmake -B build
-cmake --build build
-
-# OpenAI example
+# Run basic stream (OpenAI)
 export OPENAI_API_KEY=sk-...
 ./build/basic_stream
 
-# Multi-turn REPL (uses ANTHROPIC_API_KEY if set, else OPENAI_API_KEY)
+# Run chat loop (Anthropic preferred, falls back to OpenAI)
 export ANTHROPIC_API_KEY=sk-ant-...
 ./build/chat_loop
 ```
 
----
+## Why
+
+- **No Python runtime.** Ship LLM features in an existing C++ binary — games, CLIs, embedded apps, servers.
+- **No build complexity.** One header, one link flag (`-lcurl`). Works with any build system: CMake, Make, Bazel, MSVC, whatever.
+- **Drop into any project.** No SDK to install, no package manager, no versioning hell. Copy one file and you're streaming.
 
 ## Requirements
 
-- C++17 or later
-- libcurl (ships by default on macOS and most Linux distros; `apt install libcurl4-openssl-dev` on Debian/Ubuntu; `vcpkg install curl` on Windows)
-
----
+- C++17 (`-std=c++17`)
+- libcurl — ships by default on macOS and most Linux distros. On Windows, grab it from [curl.se](https://curl.se/windows/).
 
 ## License
 
-MIT -- see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
