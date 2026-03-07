@@ -14,3 +14,4 @@ CMakeCache.txt
 Makefile
 .vscode/
 .idea/
+build*/
