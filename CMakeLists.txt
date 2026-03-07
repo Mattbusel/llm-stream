@@ -1,24 +1,16 @@
-cmake_minimum_required(VERSION 3.16)
-project(llm_stream_examples CXX)
+cmake_minimum_required(VERSION 3.14)
+project(llm-stream CXX)
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(CURL REQUIRED)
+find_library(CURL_LIB NAMES curl libcurl PATHS "C:/Users/Matthew/vcpkg/installed/x64-windows/lib" NO_DEFAULT_PATH)
+set(CURL_INC "C:/Users/Matthew/vcpkg/installed/x64-windows/include")
 
-add_executable(basic_stream examples/basic_stream.cpp)
-target_include_directories(basic_stream PRIVATE include)
-target_link_libraries(basic_stream CURL::libcurl)
-target_compile_options(basic_stream PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall>
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wextra>
-    $<$<CXX_COMPILER_ID:MSVC>:/W4>
-)
-
-add_executable(chat_loop examples/chat_loop.cpp)
-target_include_directories(chat_loop PRIVATE include)
-target_link_libraries(chat_loop CURL::libcurl)
-target_compile_options(chat_loop PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall>
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wextra>
-    $<$<CXX_COMPILER_ID:MSVC>:/W4>
-)
+foreach(EXAMPLE basic_stream chat_loop)
+    add_executable(${EXAMPLE} examples/${EXAMPLE}.cpp)
+    target_include_directories(${EXAMPLE} PRIVATE include ${CURL_INC})
+    target_link_libraries(${EXAMPLE} PRIVATE ${CURL_LIB})
+    target_compile_options(${EXAMPLE} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/W4>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+    )
+endforeach()
