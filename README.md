@@ -64,12 +64,32 @@ g++ -std=c++17 -O2 main.cpp -lcurl -o demo
 | `stream_openai(...)` / `stream_anthropic(...)` | Call a specific provider |
 | `Config{api_key, model, max_tokens, temperature, system_prompt}` | Request settings |
 | `StreamStats{token_count, elapsed_ms, tokens_per_sec}` | Passed to `on_done` |
+| `SseParser{}.feed(chunk, on_event)` / `parse_sse(body)` | Parse a `text/event-stream` body yourself (no libcurl needed) |
+
+## Parse SSE from your own HTTP client
+
+If you already have an HTTP stack, use only the parser. It is header-only (no
+`LLM_STREAM_IMPLEMENTATION`), follows the WHATWG event-stream rules (LF, CRLF or CR
+line ends, comments, multi-line `data:`, events split across chunks) and, with
+`LLM_STREAM_NO_CURL`, does not include `<curl/curl.h>`:
+
+```cpp
+#define LLM_STREAM_NO_CURL
+#include "llm_stream.hpp"
+
+llm::SseParser parser;
+auto on_event = [](const llm::SseEvent& e) { /* e.event, e.data, e.id */ };
+parser.feed(bytes_from_the_socket, on_event);   // as often as bytes arrive
+parser.finish(on_event);                        // at end of body
+
+for (const auto& e : llm::parse_sse(whole_body)) { /* same, for a buffered body */ }
+```
 
 ## Notes and limitations
 
 - Each call is a single-turn request (one user message plus optional system prompt). For multi-turn history see [llm-chat](https://github.com/Mattbusel/llm-chat).
 - Calls block until the stream ends; run them on a worker thread (or via [llm-pool](https://github.com/Mattbusel/llm-pool)) if you need your UI to stay responsive.
-- `<curl/curl.h>` is included by the public header, so every file that includes `llm_stream.hpp` needs the libcurl headers on its include path.
+- `<curl/curl.h>` is included by the public header (unless `LLM_STREAM_NO_CURL` is defined), so every file that includes `llm_stream.hpp` for the network API needs the libcurl headers on its include path.
 
 ## Build the examples
 

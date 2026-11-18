@@ -21,3 +21,8 @@ add_executable(test_responses_sse tests/test_responses_sse.cpp)
 target_include_directories(test_responses_sse PRIVATE include ${CURL_INC})
 target_link_libraries(test_responses_sse PRIVATE ${CURL_LIB})
 add_test(NAME test_responses_sse COMMAND test_responses_sse)
+
+# SSE parser on its own (LLM_STREAM_NO_CURL): no libcurl on the include path or link line.
+add_executable(test_sse tests/test_sse.cpp)
+target_include_directories(test_sse PRIVATE include)
+add_test(NAME test_sse COMMAND test_sse)
